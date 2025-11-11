@@ -3,20 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TK 事件激活后台（Index 单文件）</title>
+  <title>TK 事件激活后台（单文件 / 含 TikTok 标准事件 + 点击频率）</title>
   <style>
     :root { --border:#e5e7eb; --muted:#6b7280; --bg:#fafafa; --text:#111827; --accent:#111; }
     * { box-sizing: border-box; }
     body { font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei"; margin: 24px; color: var(--text); background: var(--bg); }
     h1 { margin: 0 0 12px; font-size: 22px; }
     h3 { margin: 0 0 8px; font-size: 16px; }
-    .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom: 12px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
     .card { border: 1px solid var(--border); background:#fff; border-radius: 14px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
     .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .muted { color: var(--muted); font-size: 12px; }
-    select, input[type="number"], input[type="text"] {
-      padding: 10px 12px; border:1px solid var(--border); border-radius: 10px; background:#fff; min-width: 160px;
-    }
+    select, input[type="number"], input[type="text"] { padding: 10px 12px; border:1px solid var(--border); border-radius: 10px; background:#fff; min-width: 160px; }
     button { padding: 10px 14px; border:1px solid var(--accent); background: var(--accent); color:#fff; border-radius: 10px; cursor:pointer; font-weight: 600; }
     button.secondary { background:#fff; color:var(--accent); }
     button:disabled { opacity:.5; cursor:not-allowed; }
@@ -28,7 +27,6 @@
     .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#f3f4f6; border:1px solid #e5e7eb; }
     .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 960px){ .grid { grid-template-columns: 1fr; } }
-    .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
     .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; background:#f3f4f6; border:1px solid #e5e7eb; padding:2px 6px; border-radius:6px; font-size:12px; }
     .badge { font-size:12px; padding:4px 8px; border-radius:8px; border:1px solid #e5e7eb; color:#374151; background:#fff; }
     .danger { color:#b91c1c; }
@@ -39,43 +37,45 @@
   <div class="topbar">
     <h1>TK 事件激活后台</h1>
     <div class="toolbar">
-      <label class="badge">
-        <input id="mockToggle" type="checkbox" />
-        使用假数据模式
-      </label>
-      <span class="muted">API 根地址：
-        <span class="kbd" id="apiBaseText"></span>
-      </span>
+      <label class="badge"><input id="mockToggle" type="checkbox" /> 使用假数据模式</label>
+      <span class="muted">API 根地址：<span class="kbd" id="apiBaseText"></span></span>
     </div>
   </div>
 
   <div class="card">
     <h3>激活面板</h3>
     <div class="row" style="margin-bottom:8px">
-      <label>事件类型：
-        <select id="eventType"></select>
+      <label>事件类型（TikTok 标准）：
+        <select id="ttEvent"></select>
       </label>
-      <label>激活次数：
-        <input id="count" type="number" min="1" max="10000" value="1" />
+      <label>激活次数（总量）：
+        <input id="count" type="number" min="1" max="100000" value="1" />
+      </label>
+      <label>点击频率（次/分钟）：
+        <input id="rate" type="number" min="1" max="600" value="60" />
       </label>
       <label>备注：
         <input id="note" type="text" placeholder="可选（如渠道、批次号）" />
       </label>
-      <button id="activateBtn">立即激活</button>
+    </div>
+    <div class="row">
+      <button id="startBtn">开始激活（按频率）</button>
+      <button id="stopBtn" class="secondary" disabled>停止</button>
+      <span class="muted">每次向后端发送 <span class="kbd">/api/activate</span>，并在备注附带事件代码</span>
     </div>
     <p id="activateMsg" class="muted"></p>
   </div>
 
   <div class="grid">
     <div class="card">
-      <h3>事件类型统计</h3>
+      <h3>事件类型统计（来自后端）</h3>
       <table id="statsTbl">
         <thead>
           <tr><th>ID</th><th>Key</th><th>名称</th><th>状态</th><th>累计</th><th>今日</th></tr>
         </thead>
         <tbody></tbody>
       </table>
-      <p class="muted" style="margin-top:8px">Tips：禁用/启用请在后端进行；这里仅展示状态。</p>
+      <p class="muted" style="margin-top:8px">提示：此处展示你后端的事件类型；TikTok 事件会附在备注中，便于审计。</p>
     </div>
 
     <div class="card">
@@ -93,56 +93,71 @@
 
 <script>
 /** ====== 可配置项 ====== */
-// 改成你的后端地址（末尾不要斜杠）。如果在同域，保留空字符串即可：
-let API_BASE = ""; // 例如 "https://your-domain.com"
-// 初始是否开启假数据模式（本地打开建议 true）：
-let USE_MOCK = location.protocol === "file:";
+let API_BASE = ""; // 同域留空；或改为你的后端地址，如 "https://your-domain.com"
+let USE_MOCK = location.protocol === "file:"; // 本地双击默认启用假数据
 
-/** ====== DOM 引用 ====== */
-const selEvent = document.getElementById('eventType');
+/** ====== TikTok 标准事件（官方名称 + 事件代码） ====== */
+// 参考：TikTok Business Help Center（标准事件列表，含事件代码）。
+const TIKTOK_EVENTS = [
+  { name: 'Add Payment Info', code: 'AddPaymentInfo' },
+  { name: 'Add to Cart', code: 'AddToCart' },
+  { name: 'Add to Wishlist', code: 'AddToWishlist' },
+  { name: 'Application Approval', code: 'ApplicationApproval' },
+  { name: 'Complete Registration', code: 'CompleteRegistration' },
+  { name: 'Contact', code: 'Contact' },
+  { name: 'Customize Product', code: 'CustomizeProduct' },
+  { name: 'Download', code: 'Download' },
+  { name: 'FindLocation', code: 'FindLocation' },
+  { name: 'Initiate Checkout', code: 'InitiateCheckout' },
+  { name: 'Purchase', code: 'Purchase' },
+  { name: 'Schedule', code: 'Schedule' },
+  { name: 'Search', code: 'Search' },
+  { name: 'Start Trial', code: 'StartTrial' },
+  { name: 'Submit Application', code: 'SubmitApplication' },
+  { name: 'Submit Form', code: 'SubmitForm' },
+  { name: 'Subscribe', code: 'Subscribe' },
+  { name: 'View Content', code: 'ViewContent' },
+];
+
+/** ====== DOM ====== */
+const mockToggle = document.getElementById('mockToggle');
+const apiBaseText = document.getElementById('apiBaseText');
+const selTtEvent = document.getElementById('ttEvent');
 const inputCount = document.getElementById('count');
+const inputRate = document.getElementById('rate');
 const inputNote = document.getElementById('note');
-const btnActivate = document.getElementById('activateBtn');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
 const elActMsg = document.getElementById('activateMsg');
 const tblStatsBody = document.querySelector('#statsTbl tbody');
 const tblLogsBody = document.querySelector('#logsTbl tbody');
-const mockToggle = document.getElementById('mockToggle');
-const apiBaseText = document.getElementById('apiBaseText');
 
 mockToggle.checked = USE_MOCK;
 apiBaseText.textContent = USE_MOCK ? 'mock://local' : (API_BASE || '(同域)');
 
 /** ====== 假数据 ====== */
-let __mock_id_seed = 2000;
-const MOCK_TYPES = [
-  { id: 1, key: 'install', name: '安装/Install', enabled: 1, total_count: 10234, today_count: 123 },
-  { id: 2, key: 'purchase', name: '购买/Purchase', enabled: 1, total_count: 4567, today_count: 42 },
-  { id: 3, key: 'signup', name: '注册/Signup', enabled: 0, total_count: 987, today_count: 0 },
+let __mock_id_seed = 3000;
+let MOCK_TYPES = [
+  { id: 1, key: 'install', name: '安装/Install', enabled: 1, total_count: 12000, today_count: 50 },
+  { id: 2, key: 'purchase', name: '购买/Purchase', enabled: 1, total_count: 5600, today_count: 10 },
+  { id: 3, key: 'signup', name: '注册/Signup', enabled: 1, total_count: 2200, today_count: 5 },
 ];
-let MOCK_LOGS = Array.from({length: 20}).map((_,i) => ({
-  id: __mock_id_seed - i,
-  created_at: new Date(Date.now()-i*3600e3).toISOString(),
-  event_name: i%2? '购买/Purchase':'安装/Install',
-  event_key: i%2? 'purchase':'install',
-  count: (i%3)+1,
-  note: i%4? '渠道A':'' ,
-  actor_ip: '203.0.113.' + (50+i)
-}));
+let MOCK_LOGS = [];
 
-/** ====== 小工具 ====== */
+/** ====== 工具 ====== */
 function fmtTime(iso){ try{ return new Date(iso).toLocaleString(); }catch{ return iso; } }
 function el(tag, html){ const e=document.createElement(tag); e.innerHTML=html; return e; }
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-/** ====== 请求封装（支持 mock） ====== */
+/** ====== API 封装（含 mock） ====== */
 async function apiGet(path){
   if (USE_MOCK) {
-    await sleep(200);
+    await sleep(120);
     if (path.startsWith('/api/event-types')) return JSON.parse(JSON.stringify(MOCK_TYPES));
     if (path.startsWith('/api/activations')) return JSON.parse(JSON.stringify(MOCK_LOGS));
     throw new Error('Mock 未实现 GET: ' + path);
   }
-  const res = await fetch(API_BASE + path, { headers: { 'Content-Type':'application/json' }});
+  const res = await fetch(API_BASE + path, { headers: { 'Content-Type':'application/json' } });
   const data = await res.json().catch(()=> ({}));
   if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
   return data.data ?? data;
@@ -150,48 +165,45 @@ async function apiGet(path){
 
 async function apiPost(path, body){
   if (USE_MOCK) {
-    await sleep(200);
+    await sleep(120);
     if (path === '/api/activate') {
-      const { event_type_id, count, note } = body || {};
-      const t = MOCK_TYPES.find(x=>x.id===Number(event_type_id));
-      if (!t) throw new Error('事件类型不存在（mock）');
-      if (!t.enabled) throw new Error('该事件类型已禁用（mock）');
-      t.total_count += Number(count)||0;
-      t.today_count += Number(count)||0;
+      const { count, note } = body || {};
+      const chosen = selTtEvent.options[selTtEvent.selectedIndex]?.textContent || '';
       MOCK_LOGS.unshift({
         id: ++__mock_id_seed,
         created_at: new Date().toISOString(),
-        event_name: t.name,
-        event_key: t.key,
+        event_name: chosen,
+        event_key: chosen.match(/\((.*?)\)$/)?.[1] || 'N/A',
         count: Number(count)||0,
         note: note || '',
         actor_ip: '198.51.100.77'
       });
-      return { event_type_id, count };
+      // 也把统计随便加一点，便于演示
+      if (MOCK_TYPES[0]) { MOCK_TYPES[0].total_count += Number(count)||0; MOCK_TYPES[0].today_count += Number(count)||0; }
+      return { ok: true };
     }
     throw new Error('Mock 未实现 POST: ' + path);
   }
-  const res = await fetch(API_BASE + path, {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(body || {})
-  });
+  const res = await fetch(API_BASE + path, { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body || {}) });
   const data = await res.json().catch(()=> ({}));
   if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
   return data.data ?? data;
 }
 
 /** ====== 渲染 ====== */
+function renderTikTokEvents(){
+  selTtEvent.innerHTML = '';
+  TIKTOK_EVENTS.forEach(ev => {
+    const opt = document.createElement('option');
+    opt.value = ev.code;
+    opt.textContent = `${ev.name} (${ev.code})`;
+    selTtEvent.appendChild(opt);
+  });
+}
+
 function renderStats(rows){
-  selEvent.innerHTML = '';
   tblStatsBody.innerHTML = '';
   rows.forEach(row => {
-    const opt = document.createElement('option');
-    opt.value = row.id;
-    opt.textContent = `${row.name} (${row.key}) ${row.enabled ? '' : '【禁用】'}`;
-    if (!row.enabled) opt.disabled = true;
-    selEvent.appendChild(opt);
-
     const status = row.enabled
       ? `<span class="status-dot ok"></span>启用`
       : `<span class="status-dot off"></span><span class="danger">禁用</span>`;
@@ -213,7 +225,7 @@ function renderLogs(rows){
     const tr = el('tr', `
       <td>${x.id}</td>
       <td>${fmtTime(x.created_at)}</td>
-      <td>${x.event_name} <span class="pill">${x.event_key}</span></td>
+      <td>${x.event_name || ''} ${x.event_key ? `<span class="pill">${x.event_key}</span>`: ''}</td>
       <td>${x.count}</td>
       <td>${x.note || ''}</td>
       <td>${x.actor_ip || ''}</td>
@@ -222,36 +234,77 @@ function renderLogs(rows){
   });
 }
 
-/** ====== 事件绑定 ====== */
-btnActivate.onclick = async () => {
-  const id = Number(selEvent.value);
-  const n = Number(inputCount.value);
+/** ====== 点击频率调度 ====== */
+let timer = null;
+let remaining = 0;
+
+async function tickOnce(){
+  // 每个 tick 调用一次 /api/activate，count=1（逐次激活，模拟点击节奏）
+  const evCode = selTtEvent.value;
+  const evName = selTtEvent.options[selTtEvent.selectedIndex]?.textContent || evCode;
   const note = inputNote.value.trim();
-  elActMsg.textContent = '执行中...';
-  btnActivate.disabled = true;
-  try{
-    if (!Number.isInteger(n) || n<=0) throw new Error('次数必须为正整数');
-    if (n>10000) throw new Error('单次最多 10000 次');
-    await apiPost('/api/activate', { event_type_id: id, count: n, note });
-    elActMsg.innerHTML = '<span class="success">✅ 激活成功</span>';
-    await loadAll();
-    inputNote.value = '';
-  }catch(e){
-    elActMsg.innerHTML = '<span class="danger">❌ ' + (e.message || e.toString()) + '</span>';
-  }finally{
-    btnActivate.disabled = false;
-    setTimeout(()=> elActMsg.textContent='', 3000);
+  await apiPost('/api/activate', {
+    // 如果你的后端需要 event_type_id，可在这里扩展映射；当前用备注携带 TikTok 标准事件信息
+    count: 1,
+    note: `[TT:${evCode}] ${evName}` + (note? ` | ${note}`: '')
+  });
+}
+
+async function startSchedule(){
+  const total = Number(inputCount.value);
+  const rate = Number(inputRate.value); // 次/分钟
+  if (!Number.isInteger(total) || total<=0) throw new Error('激活次数必须为正整数');
+  if (!Number.isFinite(rate) || rate<=0) throw new Error('点击频率必须为正数');
+  const intervalMs = Math.max(50, Math.floor(60000 / rate)); // 最短 50ms 保护
+
+  remaining = total;
+  startBtn.disabled = true; stopBtn.disabled = false; mockToggle.disabled = true;
+  elActMsg.textContent = `执行中：剩余 ${remaining} 次（间隔 ${intervalMs}ms）`;
+
+  // 立即执行一次，然后按频率循环
+  try { await tickOnce(); remaining--; await refreshData(); } catch(e){ console.error(e); elActMsg.innerHTML = '<span class="danger">❌ '+(e.message||e)+'</span>'; stopSchedule(); return; }
+
+  timer = setInterval(async () => {
+    if (remaining <= 0) { stopSchedule(); return; }
+    try {
+      await tickOnce();
+      remaining--;
+      elActMsg.textContent = `执行中：剩余 ${remaining} 次`;
+      if (remaining % Math.max(1, Math.floor(Number(inputRate.value)/5)) === 0) {
+        // 间歇刷新一次
+        refreshData();
+      }
+      if (remaining <= 0) { stopSchedule(); }
+    } catch (e) {
+      console.error(e);
+      elActMsg.innerHTML = '<span class="danger">❌ '+(e.message||e)+'</span>';
+      stopSchedule();
+    }
+  }, intervalMs);
+}
+
+function stopSchedule(){
+  if (timer){ clearInterval(timer); timer=null; }
+  startBtn.disabled = false; stopBtn.disabled = true; mockToggle.disabled = false;
+  if (remaining===0) {
+    elActMsg.innerHTML = '<span class="success">✅ 已完成</span>';
+  } else {
+    elActMsg.innerHTML = '<span class="muted">⏸ 已停止，剩余 '+remaining+' 次未执行</span>';
   }
-};
+  refreshData();
+}
+
+startBtn.onclick = () => startSchedule().catch(e=>{ elActMsg.innerHTML = '<span class="danger">❌ '+(e.message||e)+'</span>'; });
+stopBtn.onclick = () => stopSchedule();
 
 mockToggle.onchange = async () => {
   USE_MOCK = mockToggle.checked;
   apiBaseText.textContent = USE_MOCK ? 'mock://local' : (API_BASE || '(同域)');
-  await loadAll();
+  await refreshData();
 };
 
-/** ====== 加载 ====== */
-async function loadAll(){
+/** ====== 数据加载 ====== */
+async function refreshData(){
   try {
     const [types, logs] = await Promise.all([
       apiGet('/api/event-types'),
@@ -260,13 +313,15 @@ async function loadAll(){
     renderStats(types);
     renderLogs(logs);
   } catch (e) {
-    renderStats([]);
-    renderLogs([]);
-    elActMsg.innerHTML = '<span class="danger">加载失败：'+ (e.message || e) +'</span>';
+    renderStats([]); renderLogs([]);
+    elActMsg.innerHTML = '<span class="danger">加载失败：'+(e.message||e)+'</span>';
   }
 }
 
-loadAll();
+(function init(){
+  renderTikTokEvents();
+  refreshData();
+})();
 </script>
 </body>
 </html>
