@@ -1,5 +1,272 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>My Index</title>
-<h1>Hello from GitHub Pages</h1>
-<p>这是主页 index.html</p>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TK 事件激活后台（Index 单文件）</title>
+  <style>
+    :root { --border:#e5e7eb; --muted:#6b7280; --bg:#fafafa; --text:#111827; --accent:#111; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei"; margin: 24px; color: var(--text); background: var(--bg); }
+    h1 { margin: 0 0 12px; font-size: 22px; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    .toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom: 12px; }
+    .card { border: 1px solid var(--border); background:#fff; border-radius: 14px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: 12px; }
+    select, input[type="number"], input[type="text"] {
+      padding: 10px 12px; border:1px solid var(--border); border-radius: 10px; background:#fff; min-width: 160px;
+    }
+    button { padding: 10px 14px; border:1px solid var(--accent); background: var(--accent); color:#fff; border-radius: 10px; cursor:pointer; font-weight: 600; }
+    button.secondary { background:#fff; color:var(--accent); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    table { width:100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid #f0f0f0; }
+    thead th { font-size:12px; color:var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .status-dot { display:inline-block; width:8px; height:8px; border-radius:999px; margin-right:6px; vertical-align:middle; }
+    .ok { background:#10b981; } .off { background:#ef4444; }
+    .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#f3f4f6; border:1px solid #e5e7eb; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 960px){ .grid { grid-template-columns: 1fr; } }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; background:#f3f4f6; border:1px solid #e5e7eb; padding:2px 6px; border-radius:6px; font-size:12px; }
+    .badge { font-size:12px; padding:4px 8px; border-radius:8px; border:1px solid #e5e7eb; color:#374151; background:#fff; }
+    .danger { color:#b91c1c; }
+    .success { color:#065f46; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>TK 事件激活后台</h1>
+    <div class="toolbar">
+      <label class="badge">
+        <input id="mockToggle" type="checkbox" />
+        使用假数据模式
+      </label>
+      <span class="muted">API 根地址：
+        <span class="kbd" id="apiBaseText"></span>
+      </span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>激活面板</h3>
+    <div class="row" style="margin-bottom:8px">
+      <label>事件类型：
+        <select id="eventType"></select>
+      </label>
+      <label>激活次数：
+        <input id="count" type="number" min="1" max="10000" value="1" />
+      </label>
+      <label>备注：
+        <input id="note" type="text" placeholder="可选（如渠道、批次号）" />
+      </label>
+      <button id="activateBtn">立即激活</button>
+    </div>
+    <p id="activateMsg" class="muted"></p>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>事件类型统计</h3>
+      <table id="statsTbl">
+        <thead>
+          <tr><th>ID</th><th>Key</th><th>名称</th><th>状态</th><th>累计</th><th>今日</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted" style="margin-top:8px">Tips：禁用/启用请在后端进行；这里仅展示状态。</p>
+    </div>
+
+    <div class="card">
+      <h3>最近激活日志</h3>
+      <table id="logsTbl">
+        <thead>
+          <tr><th>ID</th><th>时间</th><th>事件</th><th>次数</th><th>备注</th><th>来源IP</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="muted">接口约定：GET <span class="kbd">/api/event-types</span>、POST <span class="kbd">/api/activate</span>、GET <span class="kbd">/api/activations?limit=50</span></p>
+
+<script>
+/** ====== 可配置项 ====== */
+// 改成你的后端地址（末尾不要斜杠）。如果在同域，保留空字符串即可：
+let API_BASE = ""; // 例如 "https://your-domain.com"
+// 初始是否开启假数据模式（本地打开建议 true）：
+let USE_MOCK = location.protocol === "file:";
+
+/** ====== DOM 引用 ====== */
+const selEvent = document.getElementById('eventType');
+const inputCount = document.getElementById('count');
+const inputNote = document.getElementById('note');
+const btnActivate = document.getElementById('activateBtn');
+const elActMsg = document.getElementById('activateMsg');
+const tblStatsBody = document.querySelector('#statsTbl tbody');
+const tblLogsBody = document.querySelector('#logsTbl tbody');
+const mockToggle = document.getElementById('mockToggle');
+const apiBaseText = document.getElementById('apiBaseText');
+
+mockToggle.checked = USE_MOCK;
+apiBaseText.textContent = USE_MOCK ? 'mock://local' : (API_BASE || '(同域)');
+
+/** ====== 假数据 ====== */
+let __mock_id_seed = 2000;
+const MOCK_TYPES = [
+  { id: 1, key: 'install', name: '安装/Install', enabled: 1, total_count: 10234, today_count: 123 },
+  { id: 2, key: 'purchase', name: '购买/Purchase', enabled: 1, total_count: 4567, today_count: 42 },
+  { id: 3, key: 'signup', name: '注册/Signup', enabled: 0, total_count: 987, today_count: 0 },
+];
+let MOCK_LOGS = Array.from({length: 20}).map((_,i) => ({
+  id: __mock_id_seed - i,
+  created_at: new Date(Date.now()-i*3600e3).toISOString(),
+  event_name: i%2? '购买/Purchase':'安装/Install',
+  event_key: i%2? 'purchase':'install',
+  count: (i%3)+1,
+  note: i%4? '渠道A':'' ,
+  actor_ip: '203.0.113.' + (50+i)
+}));
+
+/** ====== 小工具 ====== */
+function fmtTime(iso){ try{ return new Date(iso).toLocaleString(); }catch{ return iso; } }
+function el(tag, html){ const e=document.createElement(tag); e.innerHTML=html; return e; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/** ====== 请求封装（支持 mock） ====== */
+async function apiGet(path){
+  if (USE_MOCK) {
+    await sleep(200);
+    if (path.startsWith('/api/event-types')) return JSON.parse(JSON.stringify(MOCK_TYPES));
+    if (path.startsWith('/api/activations')) return JSON.parse(JSON.stringify(MOCK_LOGS));
+    throw new Error('Mock 未实现 GET: ' + path);
+  }
+  const res = await fetch(API_BASE + path, { headers: { 'Content-Type':'application/json' }});
+  const data = await res.json().catch(()=> ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
+  return data.data ?? data;
+}
+
+async function apiPost(path, body){
+  if (USE_MOCK) {
+    await sleep(200);
+    if (path === '/api/activate') {
+      const { event_type_id, count, note } = body || {};
+      const t = MOCK_TYPES.find(x=>x.id===Number(event_type_id));
+      if (!t) throw new Error('事件类型不存在（mock）');
+      if (!t.enabled) throw new Error('该事件类型已禁用（mock）');
+      t.total_count += Number(count)||0;
+      t.today_count += Number(count)||0;
+      MOCK_LOGS.unshift({
+        id: ++__mock_id_seed,
+        created_at: new Date().toISOString(),
+        event_name: t.name,
+        event_key: t.key,
+        count: Number(count)||0,
+        note: note || '',
+        actor_ip: '198.51.100.77'
+      });
+      return { event_type_id, count };
+    }
+    throw new Error('Mock 未实现 POST: ' + path);
+  }
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json' },
+    body: JSON.stringify(body || {})
+  });
+  const data = await res.json().catch(()=> ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
+  return data.data ?? data;
+}
+
+/** ====== 渲染 ====== */
+function renderStats(rows){
+  selEvent.innerHTML = '';
+  tblStatsBody.innerHTML = '';
+  rows.forEach(row => {
+    const opt = document.createElement('option');
+    opt.value = row.id;
+    opt.textContent = `${row.name} (${row.key}) ${row.enabled ? '' : '【禁用】'}`;
+    if (!row.enabled) opt.disabled = true;
+    selEvent.appendChild(opt);
+
+    const status = row.enabled
+      ? `<span class="status-dot ok"></span>启用`
+      : `<span class="status-dot off"></span><span class="danger">禁用</span>`;
+    const tr = el('tr', `
+      <td>${row.id}</td>
+      <td>${row.key}</td>
+      <td>${row.name}</td>
+      <td>${status}</td>
+      <td>${row.total_count}</td>
+      <td>${row.today_count}</td>
+    `);
+    tblStatsBody.appendChild(tr);
+  });
+}
+
+function renderLogs(rows){
+  tblLogsBody.innerHTML = '';
+  rows.forEach(x => {
+    const tr = el('tr', `
+      <td>${x.id}</td>
+      <td>${fmtTime(x.created_at)}</td>
+      <td>${x.event_name} <span class="pill">${x.event_key}</span></td>
+      <td>${x.count}</td>
+      <td>${x.note || ''}</td>
+      <td>${x.actor_ip || ''}</td>
+    `);
+    tblLogsBody.appendChild(tr);
+  });
+}
+
+/** ====== 事件绑定 ====== */
+btnActivate.onclick = async () => {
+  const id = Number(selEvent.value);
+  const n = Number(inputCount.value);
+  const note = inputNote.value.trim();
+  elActMsg.textContent = '执行中...';
+  btnActivate.disabled = true;
+  try{
+    if (!Number.isInteger(n) || n<=0) throw new Error('次数必须为正整数');
+    if (n>10000) throw new Error('单次最多 10000 次');
+    await apiPost('/api/activate', { event_type_id: id, count: n, note });
+    elActMsg.innerHTML = '<span class="success">✅ 激活成功</span>';
+    await loadAll();
+    inputNote.value = '';
+  }catch(e){
+    elActMsg.innerHTML = '<span class="danger">❌ ' + (e.message || e.toString()) + '</span>';
+  }finally{
+    btnActivate.disabled = false;
+    setTimeout(()=> elActMsg.textContent='', 3000);
+  }
+};
+
+mockToggle.onchange = async () => {
+  USE_MOCK = mockToggle.checked;
+  apiBaseText.textContent = USE_MOCK ? 'mock://local' : (API_BASE || '(同域)');
+  await loadAll();
+};
+
+/** ====== 加载 ====== */
+async function loadAll(){
+  try {
+    const [types, logs] = await Promise.all([
+      apiGet('/api/event-types'),
+      apiGet('/api/activations?limit=50')
+    ]);
+    renderStats(types);
+    renderLogs(logs);
+  } catch (e) {
+    renderStats([]);
+    renderLogs([]);
+    elActMsg.innerHTML = '<span class="danger">加载失败：'+ (e.message || e) +'</span>';
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>
